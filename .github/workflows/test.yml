@@ -89,10 +89,10 @@ jobs:
         with:
           push: true
           tags: |
-            happymask13/assignment10:latest
-            happymask13/assignment10:${{ github.sha }}
+            happymask13/assignment11:latest
+            happymask13/assignment11:${{ github.sha }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=registry,ref=happymask13/assignment10:cache
+          cache-from: type=registry,ref=happymask13/assignment11:cache
           cache-to: type=inline,mode=max
 
 
