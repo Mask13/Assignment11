@@ -303,3 +303,30 @@ Then submit the GitHub repository link as instructed.
 - [Python Downloads](https://www.python.org/downloads/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [GitHub SSH Setup Guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
+
+# Calculation Model — Design Rationale
+
+This repository now includes a `Calculation` SQLAlchemy model and Pydantic schemas. Below is a concise rationale for the design choices so future maintainers understand the trade-offs.
+
+Fields:
+- `id` (UUID): primary key.
+- `a`, `b` (float): stored operands.
+- `type` (string): operation type limited to `Add`, `Sub`, `Multiply`, `Divide`.
+- `user_id` (UUID, optional FK -> `users.id`): links a calculation to a user if available.
+
+Result storage vs compute-on-demand:
+- The `result` is not persisted in the database. Instead it is computed on-demand using a SQLAlchemy `hybrid_property`.
+- Rationale: storing results can lead to stale data if operands change. Computing on-demand keeps data consistent and simple. If profiling shows this is a bottleneck, we can add a persisted column and update it transactionally.
+
+Validation and safety:
+- Pydantic `CalculationCreate` enforces allowed operation types and prevents division by zero at creation time.
+- The ORM-level `result` also defensively returns `None` for invalid operations (e.g., division by zero) to avoid runtime exceptions.
+
+Relationship to `User`:
+- `user_id` is nullable to allow anonymous calculations. When provided, it uses a proper foreign key to `users.id` so referential integrity is enforced.
+
+Testing and migration notes:
+- Add unit tests for each operation (including division-by-zero behavior) in `tests/unit` or `tests/integration`.
+- If you use Alembic or another migration tool, add a migration to create the `calculations` table. If not, SQLAlchemy's metadata.create_all can be used in dev environments.
+
+This rationale is recorded here to make it easy for reviewers to understand why results are computed rather than stored, and to highlight validations that protect the system from common errors.
