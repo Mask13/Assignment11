@@ -1,4 +1,23 @@
-# 📦 Assignment 10 - FastAPI Calculator with Docker
+# 📦 Assignment 11 - FastAPI with Polymorphic SQLAlchemy Models
+
+## ✅ Module 11 Implementation
+
+This project demonstrates **SQLAlchemy polymorphic inheritance** for calculations with comprehensive Pydantic schemas and 96%+ test coverage.
+
+### 🎯 Key Features
+- **Polymorphic Models**: Single-table inheritance with `Calculation` base class and `Addition`, `Subtraction`, `Multiplication`, `Division` subclasses
+- **Factory Pattern**: `Calculation.create()` returns appropriate subclass based on type
+- **Pydantic Validation**: Comprehensive schemas with LBYL (Look Before You Leap) approach
+- **96% Test Coverage**: 137 tests covering models, schemas, auth, and edge cases
+- **CI/CD Pipeline**: Automated testing with 95% coverage threshold enforcement
+
+### 📊 Test Results
+```
+✅ 137 tests passed, 1 skipped
+✅ Coverage: 96.47% (exceeds 95% threshold)
+✅ All polymorphic behaviors verified
+✅ All validation rules tested
+```
 
 ## 🧪 Running Tests Locally
 
@@ -16,27 +35,34 @@ pip install -r requirements.txt
 playwright install
 ```
 
-3. Run tests:
+3. Run all tests with coverage:
 ```bash
-# Run unit tests with coverage
-pytest tests/unit/ --cov=app
+# Run all tests with coverage report (enforces 95% minimum)
+pytest
 
-# Run integration tests
-pytest tests/integration/
+# Run specific test suites
+pytest tests/unit/ -v
+pytest tests/integration/ -v
+pytest tests/e2e/ -v
 
-# Run e2e tests
-pytest tests/e2e/
+# Run polymorphic calculation tests
+pytest tests/integration/test_calculation.py -v
+pytest tests/integration/test_calculation_schema.py -v
+
+# Generate HTML coverage report
+pytest --cov-report=html
+open htmlcov/index.html
 ```
 
 ## 🐳 Docker Hub Repository
 
 The Docker image for this project is available on Docker Hub:
-[happymask13/assignment10](https://hub.docker.com/repository/docker/happymask13/assignment10/general)
+[happymask13/assignment11](https://hub.docker.com/repository/docker/happymask13/assignment11/general)
 
 To pull and run the image:
 ```bash
-docker pull happymask13/assignment10:latest
-docker run -p 8000:8000 happymask13/assignment10:latest
+docker pull happymask13/assignment11:latest
+docker run -p 8000:8000 happymask13/assignment11:latest
 ```
 
 ---
@@ -304,29 +330,148 @@ Then submit the GitHub repository link as instructed.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [GitHub SSH Setup Guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
 
-# Calculation Model — Design Rationale
+---
 
-This repository now includes a `Calculation` SQLAlchemy model and Pydantic schemas. Below is a concise rationale for the design choices so future maintainers understand the trade-offs.
+## 🧠 Polymorphic Calculation Model - Design Overview
 
-Fields:
-- `id` (UUID): primary key.
-- `a`, `b` (float): stored operands.
-- `type` (string): operation type limited to `Add`, `Sub`, `Multiply`, `Divide`.
-- `user_id` (UUID, optional FK -> `users.id`): links a calculation to a user if available.
+### Architecture
 
-Result storage vs compute-on-demand:
-- The `result` is not persisted in the database. Instead it is computed on-demand using a SQLAlchemy `hybrid_property`.
-- Rationale: storing results can lead to stale data if operands change. Computing on-demand keeps data consistent and simple. If profiling shows this is a bottleneck, we can add a persisted column and update it transactionally.
+This project implements **SQLAlchemy polymorphic inheritance** for flexible calculation types using the single-table inheritance pattern.
 
-Validation and safety:
-- Pydantic `CalculationCreate` enforces allowed operation types and prevents division by zero at creation time.
-- The ORM-level `result` also defensively returns `None` for invalid operations (e.g., division by zero) to avoid runtime exceptions.
+#### Polymorphic Models (`app/models/calculation.py`)
 
-Relationship to `User`:
-- `user_id` is nullable to allow anonymous calculations. When provided, it uses a proper foreign key to `users.id` so referential integrity is enforced.
+**Base Class:**
+```python
+class Calculation(Base):
+    __tablename__ = "calculations"
+    type = Column(String(50))  # Discriminator column
+    inputs = Column(ARRAY(Float))  # PostgreSQL array of floats
+    user_id = Column(UUID, ForeignKey("users.id"), nullable=True)
+    
+    __mapper_args__ = {
+        "polymorphic_identity": "calculation",
+        "polymorphic_on": type,
+    }
+```
 
-Testing and migration notes:
-- Add unit tests for each operation (including division-by-zero behavior) in `tests/unit` or `tests/integration`.
-- If you use Alembic or another migration tool, add a migration to create the `calculations` table. If not, SQLAlchemy's metadata.create_all can be used in dev environments.
+**Subclasses:**
+- `Addition` - Sums all inputs: `sum(inputs)`
+- `Subtraction` - First minus rest: `inputs[0] - sum(inputs[1:])`
+- `Multiplication` - Product of all: `product(inputs)`
+- `Division` - First divided by rest: `inputs[0] / inputs[1] / ...`
 
-This rationale is recorded here to make it easy for reviewers to understand why results are computed rather than stored, and to highlight validations that protect the system from common errors.
+**Factory Pattern:**
+```python
+# Returns appropriate subclass automatically
+calc = Calculation.create('addition', user_id, [1, 2, 3])
+assert isinstance(calc, Addition)
+assert calc.get_result() == 6
+```
+
+#### Pydantic Schemas (`app/schemas/calculation.py`)
+
+**Validation Schemas:**
+- `CalculationType` - Enum: `addition`, `subtraction`, `multiplication`, `division`
+- `CalculationBase` - Base with type normalization and division-by-zero validation (LBYL)
+- `CalculationCreate` - For creating calculations (includes optional `user_id`)
+- `CalculationUpdate` - For updates (all fields optional)
+- `CalculationResponse` - For API responses (includes computed `result`, no validation)
+
+**Key Features:**
+- Field validators for case-insensitive type normalization
+- Model validators for cross-field validation
+- Division by zero prevention at schema level (LBYL approach)
+- Minimum 2 inputs requirement
+- Clear error messages
+
+### Design Decisions
+
+**Why polymorphic inheritance?**
+- Single table stores all calculation types efficiently
+- SQLAlchemy automatically resolves correct subclass on query
+- Each subclass implements `get_result()` with type-specific logic
+- Type-safe: `isinstance()` checks work correctly
+- Easy to extend with new operation types
+
+**Why compute result on-demand?**
+- Avoids storing stale/redundant data
+- Keeps database schema simple
+- Result is always correct for current inputs
+- If performance becomes issue, can add caching layer
+
+**Why array of inputs instead of a/b?**
+- Supports operations on multiple values (e.g., `1 + 2 + 3 + 4`)
+- More flexible for future extensions
+- Matches real-world calculator behavior
+
+**LBYL vs EAFP:**
+- **LBYL (schemas)**: Check division by zero before creation
+- **EAFP (models)**: Catch errors during `get_result()` execution
+- Both approaches demonstrated per Module 11 requirements
+
+### Testing Strategy
+
+**Polymorphic Model Tests** (22 tests):
+- Individual operations (addition, subtraction, multiplication, division)
+- Factory pattern (correct subclass creation, case-insensitive)
+- Polymorphic behavior (mixed types in queries, type resolution)
+- Edge cases (empty inputs, division by zero, large numbers)
+
+**Schema Validation Tests** (29 tests):
+- Valid data acceptance for all types
+- Invalid data rejection with clear errors
+- Type normalization and case-insensitivity
+- Division by zero prevention (LBYL)
+- Minimum inputs validation
+- Update schema optional fields behavior
+
+**Coverage:** 96.47% overall, 94% for calculation models, 88% for schemas
+
+### Database Schema
+
+```sql
+CREATE TABLE calculations (
+    id UUID PRIMARY KEY,
+    type VARCHAR(50) NOT NULL,  -- Discriminator: 'addition', 'subtraction', etc.
+    inputs FLOAT[] NOT NULL,     -- PostgreSQL array
+    user_id UUID REFERENCES users(id)
+);
+```
+
+### Usage Examples
+
+**Creating calculations:**
+```python
+# Using factory (recommended)
+calc = Calculation.create('addition', user_id=None, inputs=[1, 2, 3])
+result = calc.get_result()  # Returns 6
+
+# Direct instantiation
+calc = Addition(user_id=None, inputs=[10, 5])
+result = calc.get_result()  # Returns 15
+
+# With Pydantic validation
+from app.schemas.calculation import CalculationCreate
+schema = CalculationCreate(type='division', inputs=[10, 2], user_id=None)
+calc = Calculation.create(schema.type, schema.user_id, schema.inputs)
+```
+
+**Querying calculations:**
+```python
+# All calculations (returns mixed subclass instances)
+calcs = session.query(Calculation).all()
+
+# Filter by type
+additions = session.query(Addition).all()
+
+# Polymorphic behavior maintained
+for calc in calcs:
+    print(f"{type(calc).__name__}: {calc.get_result()}")
+```
+
+For complete implementation details, see:
+- `app/models/calculation.py` - Polymorphic models
+- `app/schemas/calculation.py` - Pydantic schemas  
+- `tests/integration/test_calculation.py` - Model tests
+- `tests/integration/test_calculation_schema.py` - Schema tests
+- `MODULE11_SUMMARY.md` - Comprehensive summary
